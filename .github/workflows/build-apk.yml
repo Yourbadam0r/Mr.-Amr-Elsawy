@@ -1,1 +1,85 @@
+name: Build Signed APK
 
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract Android project
+        run: |
+          mkdir build-src
+          unzip -q MrAmrElsawy_Vercel_APK.zip -d build-src
+          PROJECT_DIR=$(find build-src -name settings.gradle -type f -printf '%h\n' | head -1)
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          echo "Project found at: $PROJECT_DIR"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build unsigned APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle assembleRelease --no-daemon
+
+      - name: Create signing key
+        run: |
+          keytool -genkeypair \
+            -v \
+            -keystore release.keystore \
+            -alias mr_amr_elsawy \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Mr Amr Elsawy, O=Mr Amr Elsawy, C=EG"
+
+      - name: Sign APK
+        run: |
+          BUILD_TOOLS=$ANDROID_HOME/build-tools/35.0.0
+          UNSIGNED=$(find "$PROJECT_DIR/app/build/outputs/apk/release" -name "*unsigned.apk" | head -1)
+
+          "$BUILD_TOOLS/zipalign" -f 4 \
+            "$UNSIGNED" \
+            aligned.apk
+
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks release.keystore \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out Mr-Amr-Elsawy.apk \
+            aligned.apk
+
+      - name: Verify APK
+        run: |
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose Mr-Amr-Elsawy.apk
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mr-Amr-Elsawy-APK
+          path: Mr-Amr-Elsawy.apk
+       
